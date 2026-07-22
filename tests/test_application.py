@@ -221,3 +221,61 @@ async def test_cognitive_inertia_loop_proactive_cry():
     assert outbound_queue.qsize() == 1
     msg = await outbound_queue.get()
     assert msg == "Volte logo, por favor!"
+
+
+@pytest.mark.asyncio
+async def test_cognitive_inertia_loop_exception_handling(capsys):
+    """Verify that cognitive_inertia_loop handles exceptions properly without crashing."""
+    import sys
+
+    uow = MagicMock(spec=AsyncUnitOfWork)
+    uow.attachment_repo = AsyncMock()
+    uow.__aenter__ = AsyncMock(return_value=uow)
+    uow.__aexit__ = AsyncMock(return_value=None)
+
+    user_id = uuid.uuid4()
+
+    state_manager = MagicMock(spec=SharedCognitiveState)
+    # The loop triggers apply_decay_and_anxiety, so we'll mock it to raise an exception
+    state_manager.apply_decay_and_anxiety = AsyncMock(
+        side_effect=[
+            Exception("Simulated crash"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+        ]
+    )
+    pad = EspacoPAD(pleasure=0.5, arousal=0.5, dominance=0.5)
+    attachment = EstadoApego(separation_anxiety=0.2, security_level=0.8)
+    moral = VetorMoralMFT(
+        care=0.9, fairness=0.8, loyalty=0.7, authority=0.6, sanctity=0.5, liberty=0.4
+    )
+    state_manager.get_state = AsyncMock(return_value=(pad, attachment, moral))
+
+    outbound_queue = asyncio.Queue()
+    llm_client = MagicMock(spec=GeminiAffectiveClient)
+
+    task = asyncio.create_task(
+        cognitive_inertia_loop(user_id, state_manager, uow, outbound_queue, llm_client)
+    )
+
+    # Let the loop execute for a few cycles
+    await asyncio.sleep(0.4)
+
+    # Cancel the background task
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+
+    captured = capsys.readouterr()
+    assert (
+        "[Cognitive Inertia Loop Exception] Recovered: Simulated crash" in captured.err
+    )
+    # The loop should have continued despite the exception, calling apply_decay_and_anxiety again
+    assert state_manager.apply_decay_and_anxiety.call_count >= 2
