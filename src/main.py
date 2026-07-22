@@ -42,9 +42,16 @@ async def main() -> None:
     # 1. Configuration & Env Setup
     load_env_file()
 
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "postgres")
-    db = os.getenv("POSTGRES_DB", "turing_vessel")
+    user = os.environ.get("POSTGRES_USER")
+    password = os.environ.get("POSTGRES_PASSWORD")
+    db = os.environ.get("POSTGRES_DB")
+
+    if not user or not password or not db:
+        raise ValueError(
+            "Database credentials (POSTGRES_USER, POSTGRES_PASSWORD, "
+            "POSTGRES_DB) must be explicitly set."
+        )
+
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5433")  # Uses Port 5433 configured in Phase 3
     db_url = f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
