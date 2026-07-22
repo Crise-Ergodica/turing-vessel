@@ -4,6 +4,7 @@ from logging.config import fileConfig
 
 from sqlalchemy import pool
 from sqlalchemy.ext.asyncio import create_async_engine
+
 from alembic import context
 
 # this is the Alembic Config object, which provides
@@ -19,6 +20,7 @@ if config.config_file_name is not None:
 # for 'autogenerate' support
 # target_metadata = mymodel.Base.metadata
 from src.infrastructure.database.models import Base
+
 target_metadata = Base.metadata
 
 
@@ -40,9 +42,16 @@ load_env_file()
 
 def get_db_url() -> str:
     """Build database connection URL dynamically from environment variables."""
-    user = os.getenv("POSTGRES_USER", "postgres")
-    password = os.getenv("POSTGRES_PASSWORD", "postgres")
-    db = os.getenv("POSTGRES_DB", "turing_vessel")
+    user = os.environ.get("POSTGRES_USER")
+    password = os.environ.get("POSTGRES_PASSWORD")
+    db = os.environ.get("POSTGRES_DB")
+
+    if not user or not password or not db:
+        raise ValueError(
+            "Database credentials (POSTGRES_USER, POSTGRES_PASSWORD, "
+            "POSTGRES_DB) must be explicitly set."
+        )
+
     host = os.getenv("POSTGRES_HOST", "localhost")
     port = os.getenv("POSTGRES_PORT", "5432")
     return f"postgresql+asyncpg://{user}:{password}@{host}:{port}/{db}"
@@ -63,7 +72,7 @@ def do_run_migrations(connection) -> None:
 async def run_async_migrations() -> None:
     """Initialize an async engine and run migrations online."""
     database_url = get_db_url()
-    
+
     connectable = create_async_engine(
         database_url,
         poolclass=pool.NullPool,
