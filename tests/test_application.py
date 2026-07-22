@@ -225,8 +225,7 @@ async def test_cognitive_inertia_loop_proactive_cry():
 
 @pytest.mark.asyncio
 async def test_cognitive_inertia_loop_exception_handling(capsys):
-    """Verify that cognitive_inertia_loop handles exceptions properly without crashing."""
-    import sys
+    """Verify cognitive_inertia_loop handles exceptions properly without crashing."""
 
     uow = MagicMock(spec=AsyncUnitOfWork)
     uow.attachment_repo = AsyncMock()
@@ -277,5 +276,6 @@ async def test_cognitive_inertia_loop_exception_handling(capsys):
     assert (
         "[Cognitive Inertia Loop Exception] Recovered: Simulated crash" in captured.err
     )
-    # The loop should have continued despite the exception, calling apply_decay_and_anxiety again
+    # The loop should have continued despite the exception, calling
+    # apply_decay_and_anxiety again
     assert state_manager.apply_decay_and_anxiety.call_count >= 2
