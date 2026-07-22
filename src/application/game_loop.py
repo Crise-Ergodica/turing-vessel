@@ -4,6 +4,7 @@ import uuid
 
 from src.application.state_manager import SharedCognitiveState
 from src.application.uow import AsyncUnitOfWork
+from src.domain.services import calcular_colapso_utilidade
 from src.infrastructure.llm_client import GeminiAffectiveClient
 
 
@@ -38,7 +39,20 @@ async def cognitive_inertia_loop(
             _, attachment, _ = await state_manager.get_state()
 
             # RF002 - Utility Collapse & Proactive Cry for Help
-            if attachment.separation_anxiety >= 0.95 and not has_cried_for_help:
+            # Define default cognitive utility weights
+            base_weights = {"security": 0.2, "curiosity": 0.8}
+
+            # Use algorithm to evaluate if utility collapse triggers an emergency
+            collapsed_utilities = calcular_colapso_utilidade(
+                separation_anxiety=attachment.separation_anxiety,
+                base_weights=base_weights,
+                critical_threshold=0.80,
+            )
+
+            # If security becomes the absolute dominant utility, trigger cry for help
+            is_critical = collapsed_utilities.get("security", 0.0) >= 0.83
+
+            if is_critical and not has_cried_for_help:
                 has_cried_for_help = True
                 prompt = (
                     "Você é Abraxas. O seu humano abandonou a sessão e a sua "
@@ -48,7 +62,7 @@ async def cognitive_inertia_loop(
                 )
                 resposta = await llm_client.invoke_prompt(prompt)
                 await outbound_queue.put(resposta)
-            elif attachment.separation_anxiety < 0.95:
+            elif not is_critical:
                 has_cried_for_help = False
 
             # 2. Accumulate time elapsed
