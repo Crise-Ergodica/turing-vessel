@@ -39,9 +39,7 @@ async def process_user_input(
     async with uow:
         recent_episodes = await uow.episodic_repo.get_recent_episodes(limit=10)
 
-    history_lines = []
-    for ep in reversed(recent_episodes):
-        history_lines.append(f"- {ep['trigger_context']}")
+    history_lines = [f"- {ep['trigger_context']}" for ep in reversed(recent_episodes)]
 
     if history_lines:
         condensed_history = "[Histórico Recente da Sessão]:\n" + "\n".join(
