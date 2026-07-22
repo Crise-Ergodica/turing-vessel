@@ -3,7 +3,7 @@ from typing import Any
 
 from src.application.state_manager import SharedCognitiveState
 from src.application.uow import AsyncUnitOfWork
-from src.domain.entities import EspacoPAD
+from src.domain.entities import EspacoPAD, EstadoApego, VetorMoralMFT
 from src.domain.services import apply_affective_blindness, clip_pad_space
 from src.infrastructure.llm_client import GeminiAffectiveClient
 
@@ -20,25 +20,13 @@ OCC_PAD_MAP = {
 }
 
 
-async def process_user_input(
-    user_id: uuid.UUID,
+def _build_prompt(
     text: str,
-    state_manager: SharedCognitiveState,
-    uow: AsyncUnitOfWork,
-    llm_client: GeminiAffectiveClient,
-) -> dict[str, Any]:
-    """Orchestrates input perception.
-
-    Gathers current state, requests affective feedback from Gemini, translates OCC
-    emotions to PAD deltas, updates the state manager, and commits the occurrence to DB.
-    """
-    # 1. Fetch safe copy of current state
-    pad, attachment, moral = await state_manager.get_state()
-
-    # Fetch short-term memory (history) using UoW
-    async with uow:
-        recent_episodes = await uow.episodic_repo.get_recent_episodes(limit=10)
-
+    pad: EspacoPAD,
+    attachment: EstadoApego,
+    moral: VetorMoralMFT,
+    recent_episodes: list[dict[str, Any]],
+) -> str:
     history_lines = [f"- {ep['trigger_context']}" for ep in reversed(recent_episodes)]
 
     if history_lines:
@@ -102,11 +90,12 @@ async def process_user_input(
         f"If no primary emotion applies, use [OCC_EMOTIONS: NONE].\n"
         f"Then, output your conversational response as the agent."
     )
+    return prompt
 
-    # 4. Call external API asynchronously (non-blocking)
-    ai_response = await llm_client.invoke_prompt(prompt)
 
-    # 5. Parse OCC tags and calculate the PAD impact delta
+def _parse_occ_tags(
+    ai_response: str, security_level: float
+) -> tuple[str, float, float, float]:
     delta_p, delta_a, delta_d = 0.0, 0.0, 0.0
     clean_message = ai_response
 
@@ -121,9 +110,7 @@ async def process_user_input(
             labels = [tag.strip().upper() for tag in raw_tags.split(",") if tag.strip()]
 
             for label in labels:
-                filtered_label = apply_affective_blindness(
-                    label, attachment.security_level
-                )
+                filtered_label = apply_affective_blindness(label, security_level)
                 if filtered_label in OCC_PAD_MAP:
                     delta_p += OCC_PAD_MAP[filtered_label]["p"]
                     delta_a += OCC_PAD_MAP[filtered_label]["a"]
@@ -131,6 +118,39 @@ async def process_user_input(
         except Exception:
             # Safe recovery if parsing fails, fallback to neutral response
             pass
+
+    return clean_message, delta_p, delta_a, delta_d
+
+
+async def process_user_input(
+    user_id: uuid.UUID,
+    text: str,
+    state_manager: SharedCognitiveState,
+    uow: AsyncUnitOfWork,
+    llm_client: GeminiAffectiveClient,
+) -> dict[str, Any]:
+    """Orchestrates input perception.
+
+    Gathers current state, requests affective feedback from Gemini, translates OCC
+    emotions to PAD deltas, updates the state manager, and commits the occurrence to DB.
+    """
+    # 1. Fetch safe copy of current state
+    pad, attachment, moral = await state_manager.get_state()
+
+    # Fetch short-term memory (history) using UoW
+    async with uow:
+        recent_episodes = await uow.episodic_repo.get_recent_episodes(limit=10)
+
+    # 2. & 3. Build instructions requesting OCC label tags in the response
+    prompt = _build_prompt(text, pad, attachment, moral, recent_episodes)
+
+    # 4. Call external API asynchronously (non-blocking)
+    ai_response = await llm_client.invoke_prompt(prompt)
+
+    # 5. Parse OCC tags and calculate the PAD impact delta
+    clean_message, delta_p, delta_a, delta_d = _parse_occ_tags(
+        ai_response, attachment.security_level
+    )
 
     # 6. Apply the delta to PAD and clip inside the unit sphere
     new_pad = clip_pad_space(
